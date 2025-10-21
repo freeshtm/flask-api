@@ -103,9 +103,34 @@ class User(Resource):
         users = UserModel.query.all()
         return users
 
+class Register(Resource):
+    def post(self):
+        args = user_args.parse_args()
+
+        if UserModel.query.filter_by(username=args['username']).first():
+            abort(400, message="Username already exist")
+        if UserModel.query.filter_by(email=args['email']).first():
+            abort(400,message="Email already exists")
+        ##if UserModel.query.filter_by(student_id=args['student_id']).first():
+          ##  abort(400,message="Student_id already exists")
+        
+        password_hash = generate_password_hash(args['password'])
+
+        user = UserModel(
+            username = args['username'],
+            email = args['email'],
+            password_hash = password_hash,
+            student_id = args.get('student_id'),
+            university = args.get('university')
+            )
+        db.session.add(user)
+        db.session.commit()
+
+        return {'message': "User created successfully"}, 201
     
 api.add_resource(Users, '/api/users/')
 api.add_resource(User, '/api/users/<int:id>')
+api.add_resource(Register, '/api/register/')
 
 @app.route('/')
 def home():
