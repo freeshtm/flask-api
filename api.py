@@ -125,7 +125,6 @@ class Register(Resource):
             )
         db.session.add(user)
         db.session.commit()
-
         return {'message': "User created successfully"}, 201
     
 api.add_resource(Users, '/api/users/')
