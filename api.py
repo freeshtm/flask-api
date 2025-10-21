@@ -2,7 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
 import datetime
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__) 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
@@ -127,9 +127,31 @@ class Register(Resource):
         db.session.commit()
         return {'message': "User created successfully"}, 201
     
+
+login_user_args = reqparse.RequestParser()
+login_user_args.add_argument('email', type=str, required=True, help="Email cannot be blank")
+login_user_args.add_argument('password', type=str, required=True, help="Password cannot be blank") 
+
+class Login(Resource):
+    def post(self):
+        args = login_user_args.parse_args()
+
+        user = UserModel.query.filter_by(email=args['email']).first()
+        if not user:
+            abort(404,message="User not found")
+        if not check_password_hash(user.password_hash, args['password']):
+            abort(401,message="Wrong email or password")
+        return{
+            "id" : user.id,
+            "email" : user.email,
+            "message" : "Login succesful"
+        }, 200
+
 api.add_resource(Users, '/api/users/')
 api.add_resource(User, '/api/users/<int:id>')
 api.add_resource(Register, '/api/register/')
+api.add_resource(Login, '/api/login/')
+
 
 @app.route('/')
 def home():
