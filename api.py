@@ -1,34 +1,15 @@
-from flask import Flask 
-from flask_sqlalchemy import SQLAlchemy
-from flask_restful import Resource, Api, reqparse, fields, marshal_with, abort
-import datetime
+from flask_restful import Resource, reqparse, fields, marshal_with, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 
-app = Flask(__name__) 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-db = SQLAlchemy(app) 
-api = Api(app)
-
-class UserModel(db.Model): 
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(80), nullable=False)
-    student_id = db.Column(db.String(80), nullable=True)
-    university = db.Column(db.String(80), nullable=True)
-    average_rating = db.Column(db.Float, default=0.0)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-
-    def __repr__(self): 
-        return f"User(username = {self.username}, email = {self.email})"
+from app_setup import db
+from models import UserModel
 
 user_args = reqparse.RequestParser()
 user_args.add_argument('username', type=str, required=True, help="Username cannot be blank")
 user_args.add_argument('email', type=str, required=True, help="Email cannot be blank")
-user_args.add_argument('password', type=str, required=True, help="Password cannot be blank")  # Surowe hasło, zahaszuj w kodzie
-user_args.add_argument('student_id', type=str, required=False)  # Optional
-user_args.add_argument('university', type=str, required=False)  # Optional
-# Do not add average_rating and created_at - deafults are enough
+user_args.add_argument('password', type=str, required=True, help="Password cannot be blank")
+user_args.add_argument('student_id', type=str, required=False)
+user_args.add_argument('university', type=str, required=False)
 
 userFields = {
     'id': fields.Integer,
@@ -39,6 +20,10 @@ userFields = {
     'average_rating': fields.Float,
     'created_at': fields.DateTime(dt_format='iso8601')
 }
+
+login_user_args = reqparse.RequestParser()
+login_user_args.add_argument('email', type=str, required=True, help="Email cannot be blank")
+login_user_args.add_argument('password', type=str, required=True, help="Password cannot be blank") 
 
 class Users(Resource):
     @marshal_with(userFields)
@@ -55,7 +40,7 @@ class Users(Resource):
             username=args['username'],
             email=args['email'],
             password_hash=password_hash,
-            student_id=args.get('student_id'),  # .get() for optional fields, to avoid KeyError if not provided
+            student_id=args.get('student_id'),
             university=args.get('university')
         )
         db.session.add(user)
@@ -78,12 +63,11 @@ class User(Resource):
         if not user:
             abort(404, message="User not found")
         
-        # Update if provided
         if args['username']:
             user.username = args['username']
         if args['email']:
             user.email = args['email']
-        if args['password']:  # Hash if provided
+        if args['password']:
             user.password_hash = generate_password_hash(args['password'])
         if args.get('student_id') is not None:
             user.student_id = args['student_id']
@@ -110,9 +94,7 @@ class Register(Resource):
         if UserModel.query.filter_by(username=args['username']).first():
             abort(400, message="Username already exist")
         if UserModel.query.filter_by(email=args['email']).first():
-            abort(400,message="Email already exists")
-        ##if UserModel.query.filter_by(student_id=args['student_id']).first():
-          ##  abort(400,message="Student_id already exists")
+            abort(400, message="Email already exists")
         
         password_hash = generate_password_hash(args['password'])
 
@@ -127,35 +109,18 @@ class Register(Resource):
         db.session.commit()
         return {'message': "User created successfully"}, 201
     
-
-login_user_args = reqparse.RequestParser()
-login_user_args.add_argument('email', type=str, required=True, help="Email cannot be blank")
-login_user_args.add_argument('password', type=str, required=True, help="Password cannot be blank") 
-
 class Login(Resource):
     def post(self):
         args = login_user_args.parse_args()
 
         user = UserModel.query.filter_by(email=args['email']).first()
         if not user:
-            abort(404,message="User not found")
+            abort(404, message="User not found")
         if not check_password_hash(user.password_hash, args['password']):
-            abort(401,message="Wrong email or password")
+            abort(401, message="Wrong email or password")
         return{
             "id" : user.id,
             "email" : user.email,
             "message" : "Login succesful"
         }, 200
-
-api.add_resource(Users, '/api/users/')
-api.add_resource(User, '/api/users/<int:id>')
-api.add_resource(Register, '/api/register/')
-api.add_resource(Login, '/api/login/')
-
-
-@app.route('/')
-def home():
-    return '<h1>Flask REST API</h1>'
-
-if __name__ == '__main__':
-    app.run(debug=True) 
+        
