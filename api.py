@@ -319,3 +319,73 @@ class RideComplete(Resource):
         db.session.commit()
 
         return {'message': f'Ride {ride_id} completed and participants updated'}, 200
+
+class RideParticipants(Resource):
+    @marshal_with(participantFields)
+    def get(self, ride_id):
+        # pobieramy wszystkich uczestników dla danego przejazdu
+        participants = RideParticipantModel.query.filter_by(ride_id=ride_id).all()
+        for p in participants:
+            p.status = p.status.name
+        return participants
+    
+ratings_fields = reqparse.RequestParser()
+ratings_fields.add_argument('ride_id', type=int, required=True, help="Ride ID is required")
+ratings_fields.add_argument('user_id', type=int, required=True, help="User ID is required")
+ratings_fields.add_argument('rater_id', type=int, required=True, help="Rater ID is required")
+ratings_fields.add_argument('stars', type=int, required=True, help="Stars rating is required (1-5)")
+
+
+class Ratings(Resource):
+    def post(self):
+        args = ratings_fields.parse_args()
+
+        # Sprawdzenie przejazdu
+        ride = RideModel.query.get(args['ride_id'])
+        if not ride:
+            return {'message': 'Ride not found'}, 404
+        if ride.status != RideStatus.COMPLETED:
+            return {'message': 'Cannot rate a ride that is not completed'}, 400
+
+        # Sprawdzenie poprawności gwiazdek
+        if args['stars'] < 1 or args['stars'] > 5:
+            return {'message': 'Stars rating must be between 1 and 5'}, 400
+
+        # Sprawdzenie użytkownika ocenianego
+        user = UserModel.query.get(args['user_id'])
+        if not user:
+            return {'message': 'User to be rated not found'}, 404
+
+        # Tworzymy ocenę
+        rating = RatingModel(
+            ride_id=args['ride_id'],
+            user_id=args['user_id'],
+            rater_id=args['rater_id'],
+            stars=args['stars']
+        )
+        db.session.add(rating)
+        db.session.flush()  
+
+        all_ratings = RatingModel.query.filter_by(user_id=args['user_id']).all()
+        total_stars = sum(r.stars for r in all_ratings)
+        user.average_rating = total_stars / len(all_ratings)
+
+        db.session.commit()
+
+        return {'message': 'Rating submitted successfully'}, 201
+    
+class UserRides(Resource):
+    @marshal_with(rideFields)
+    def get(self, id):
+        driver_rides = RideModel.query.filter_by(driver_id=id).all()
+
+        participant_rides_ids = db.session.query(RideParticipantModel.ride_id)\
+            .filter_by(passenger_id=id).subquery()
+        passenger_rides = RideModel.query.filter(RideModel.id.in_(participant_rides_ids)).all()
+
+        all_rides = {ride.id: ride for ride in driver_rides + passenger_rides}.values()
+        
+        for ride in all_rides:
+            ride.status = ride.status.name
+
+        return list(all_rides)
