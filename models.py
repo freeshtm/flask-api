@@ -40,7 +40,7 @@ class RideModel(db.Model):
     departure_time = db.Column(db.DateTime, nullable=False)
     price_per_seat = db.Column(db.Float, nullable=False)
     seats_available = db.Column(db.Integer, nullable=False)
-    status = db.Column(db.Enum(RideStatus), default=RideStatus.PLANNED)
+    status = db.Column(db.Enum(RideStatus, by_name=False), default=RideStatus.PLANNED) #dodałem to by_name
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     def __repr__(self):
@@ -73,3 +73,4 @@ class RatingModel(db.Model):
 
     def __repr__(self):
         return f"Rating(id = {self.id}, ride_id = {self.ride_id}, user_id = {self.user_id}, rater_id = {self.rater_id}, stars = {self.stars})"
+
