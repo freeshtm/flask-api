@@ -323,7 +323,6 @@ class RideComplete(Resource):
 class RideParticipants(Resource):
     @marshal_with(participantFields)
     def get(self, ride_id):
-        # pobieramy wszystkich uczestników dla danego przejazdu
         participants = RideParticipantModel.query.filter_by(ride_id=ride_id).all()
         for p in participants:
             p.status = p.status.name
@@ -340,23 +339,19 @@ class Ratings(Resource):
     def post(self):
         args = ratings_fields.parse_args()
 
-        # Sprawdzenie przejazdu
         ride = RideModel.query.get(args['ride_id'])
         if not ride:
             return {'message': 'Ride not found'}, 404
         if ride.status != RideStatus.COMPLETED:
             return {'message': 'Cannot rate a ride that is not completed'}, 400
 
-        # Sprawdzenie poprawności gwiazdek
         if args['stars'] < 1 or args['stars'] > 5:
             return {'message': 'Stars rating must be between 1 and 5'}, 400
 
-        # Sprawdzenie użytkownika ocenianego
         user = UserModel.query.get(args['user_id'])
         if not user:
             return {'message': 'User to be rated not found'}, 404
 
-        # Tworzymy ocenę
         rating = RatingModel(
             ride_id=args['ride_id'],
             user_id=args['user_id'],
