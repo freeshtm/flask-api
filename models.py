@@ -9,12 +9,6 @@ class RideStatus(enum.Enum):
     COMPLETED = 'completed'
     CANCELLED = 'cancelled'
 
-class ParticipantStatus(enum.Enum):
-    REQUESTED = 'requested'
-    ACCEPTED = 'accepted'
-    COMPLETED = 'completed'
-    CANCELLED = 'cancelled'
-
 class UserModel(db.Model): 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -52,11 +46,10 @@ class RideParticipantModel(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     ride_id = db.Column(db.Integer, db.ForeignKey('ride_model.id', ondelete='CASCADE'), nullable=False)
     passenger_id = db.Column(db.Integer, db.ForeignKey('user_model.id', ondelete='CASCADE'), nullable=False)
-    status = db.Column(db.Enum(ParticipantStatus), default=ParticipantStatus.REQUESTED)
     joined_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     def __repr__(self):
-        return f"RideParticipant(id = {self.id}, ride_id = {self.ride_id}, passenger_id = {self.passenger_id}, status = {self.status})"
+        return f"RideParticipant(id = {self.id}, ride_id = {self.ride_id}, passenger_id = {self.passenger_id})"
 
 class RatingModel(db.Model):
     __table_args__ = (
