@@ -5,6 +5,13 @@ from app_setup import db
 from models import UserModel
 from models import *
 from datetime import datetime
+import enum
+
+class EnumField(fields.Raw):
+    def format(self, value):
+        if isinstance(value, enum.Enum):
+            return value.value
+        return value
 
 user_args = reqparse.RequestParser()
 user_args.add_argument('username', type=str, required=True, help="Username cannot be blank")
@@ -31,6 +38,7 @@ login_user_args.add_argument('password', type=str, required=True, help="Password
 rideFields = {
     'id': fields.Integer,
     'driver_id': fields.Integer,
+    'driver_name': fields.String,
     'from_address': fields.String,
     'from_lat': fields.Float,
     'from_lng': fields.Float,
@@ -40,7 +48,7 @@ rideFields = {
     'departure_time': fields.DateTime(dt_format='iso8601'),
     'price_per_seat': fields.Float,
     'seats_available': fields.Integer,
-    'status': fields.String,
+    'status': EnumField,
     'created_at': fields.DateTime(dt_format='iso8601')
 }
 
@@ -162,7 +170,10 @@ class Login(Resource):
 class Rides(Resource):
     @marshal_with(rideFields)
     def get(self):
-        rides = RideModel.query.all() 
+        rides = RideModel.query.all()
+        for ride in rides:
+            driver = UserModel.query.get(ride.driver_id)
+            ride.driver_name = driver.username if driver else None
         return rides 
     
     @marshal_with(rideFields)
@@ -216,8 +227,12 @@ class RideJoin(Resource):
         if not ride:
             return {'message': 'Ride not found'}, 404
 
+        if ride.status != RideStatus.PLANNED:
+            return {'message': 'Cannot join ride that is not in PLANNED status'}, 400
+
         if ride.seats_available <= 0:
             return {'message': 'No seats available'}, 400
+        
         if ride.driver_id == args['passenger_id']:
             return {'message': 'Driver cannot join'}, 400
 
@@ -230,8 +245,7 @@ class RideJoin(Resource):
 
         participant = RideParticipantModel(
             ride_id=ride_id,
-            passenger_id=args['passenger_id'],
-            status=ParticipantStatus.REQUESTED
+            passenger_id=args['passenger_id']
         )
 
         ride.seats_available -= 1
@@ -244,7 +258,6 @@ participantFields = {
     'id': fields.Integer,
     'ride_id': fields.Integer,
     'passenger_id': fields.Integer,
-    'status': fields.String,
     'joined_at': fields.DateTime(dt_format='iso8601')
 }
 
@@ -261,6 +274,13 @@ class RideLeave(Resource):
         parser.add_argument('passenger_id', type=int, required=True, help="Passenger ID is required")
         args = parser.parse_args()
 
+        ride = RideModel.query.get(ride_id)
+        if not ride:
+            return {'message': 'Ride not found'}, 404
+
+        if ride.status != RideStatus.PLANNED:
+            return {'message': 'Cannot leave ride that is not in PLANNED status'}, 400
+
         participant = RideParticipantModel.query.filter_by(
             ride_id=ride_id,
             passenger_id=args['passenger_id']
@@ -269,10 +289,6 @@ class RideLeave(Resource):
         if not participant:
             return {'message': 'Passenger not in this ride'}, 404
 
-        if participant.status != ParticipantStatus.REQUESTED:
-            return {'message': 'Cannot leave ride in current status'}, 400
-
-        ride = RideModel.query.get(ride_id)
         ride.seats_available += 1
 
         db.session.delete(participant)
@@ -282,17 +298,44 @@ class RideLeave(Resource):
     
 class RideStart(Resource):
     def patch(self, ride_id):
+        parser = reqparse.RequestParser()
+        parser.add_argument('driver_id', type=int, required=True, help="Driver ID is required")
+        parser.add_argument('participant_ids', type=int, action='append', required=True, help="List of participant IDs in the vehicle")
+        args = parser.parse_args()
+
         ride = RideModel.query.get(ride_id)
         if not ride:
             return {'message': 'Ride not found'}, 404
 
+        if ride.driver_id != args['driver_id']:
+            return {'message': 'Only the driver can start the ride'}, 403
+
         if ride.status != RideStatus.PLANNED:
             return {'message': 'Ride cannot be started'}, 400
+
+        all_participants = RideParticipantModel.query.filter_by(ride_id=ride_id).all()
+        confirmed_ids = set(args['participant_ids'])
+
+        removed_count = 0
+        for participant in all_participants:
+            if participant.passenger_id not in confirmed_ids:
+                ride.seats_available += 1
+                db.session.delete(participant)
+                removed_count += 1
+
+        registered_ids = {p.passenger_id for p in all_participants}
+        invalid_ids = confirmed_ids - registered_ids
+        if invalid_ids:
+            return {'message': f'Invalid participant IDs: {list(invalid_ids)}'}, 400
 
         ride.status = RideStatus.IN_PROGRESS
         db.session.commit()
 
-        return {'message': f'Ride {ride_id} started'}, 200
+        return {
+            'message': f'Ride {ride_id} started with {len(confirmed_ids)} participants',
+            'confirmed_participants': list(confirmed_ids),
+            'removed_participants': removed_count
+        }, 200
     
 class RideComplete(Resource):
     def patch(self, ride_id):
@@ -311,22 +354,62 @@ class RideComplete(Resource):
             return {'message': 'Ride is not in progress and cannot be completed'}, 400
 
         ride.status = RideStatus.COMPLETED
-
-        participants = RideParticipantModel.query.filter_by(ride_id=ride_id).all()
-        for p in participants:
-            p.status = ParticipantStatus.COMPLETED
-
         db.session.commit()
 
-        return {'message': f'Ride {ride_id} completed and participants updated'}, 200
+        participants_count = RideParticipantModel.query.filter_by(ride_id=ride_id).count()
+
+        return {
+            'message': f'Ride {ride_id} completed',
+            'participants_count': participants_count
+        }, 200
+
+class RideCancel(Resource):
+    def patch(self, ride_id):
+        parser = reqparse.RequestParser()
+        parser.add_argument('driver_id', type=int, required=True, help="Driver ID is required")
+        args = parser.parse_args()
+
+        ride = RideModel.query.get(ride_id)
+        if not ride:
+            return {'message': 'Ride not found'}, 404
+
+        if ride.driver_id != args['driver_id']:
+            return {'message': 'Only the driver can cancel the ride'}, 403
+
+        if ride.status == RideStatus.COMPLETED:
+            return {'message': 'Cannot cancel a completed ride'}, 400
+
+        if ride.status == RideStatus.CANCELLED:
+            return {'message': 'Ride is already cancelled'}, 400
+
+        participants = RideParticipantModel.query.filter_by(ride_id=ride_id).all()
+        for participant in participants:
+            db.session.delete(participant)
+        
+        ride.status = RideStatus.CANCELLED
+        db.session.commit()
+
+        return {
+            'message': f'Ride {ride_id} cancelled',
+            'removed_participants': len(participants)
+        }, 200
 
 class RideParticipants(Resource):
-    @marshal_with(participantFields)
     def get(self, ride_id):
         participants = RideParticipantModel.query.filter_by(ride_id=ride_id).all()
-        for p in participants:
-            p.status = p.status.name
-        return participants
+        
+        result = []
+        for participant in participants:
+            user = UserModel.query.get(participant.passenger_id)
+            result.append({
+                'id': participant.id,
+                'ride_id': participant.ride_id,
+                'passenger_id': participant.passenger_id,
+                'passenger_username': user.username if user else None,
+                'joined_at': participant.joined_at.isoformat()
+            })
+        
+        return result
     
 ratings_fields = reqparse.RequestParser()
 ratings_fields.add_argument('ride_id', type=int, required=True, help="Ride ID is required")
@@ -378,9 +461,10 @@ class UserRides(Resource):
             .filter_by(passenger_id=id).subquery()
         passenger_rides = RideModel.query.filter(RideModel.id.in_(participant_rides_ids)).all()
 
-        all_rides = {ride.id: ride for ride in driver_rides + passenger_rides}.values()
+        all_rides = list({ride.id: ride for ride in driver_rides + passenger_rides}.values())
         
         for ride in all_rides:
-            ride.status = ride.status.name
+            driver = UserModel.query.get(ride.driver_id)
+            ride.driver_name = driver.username if driver else None
 
-        return list(all_rides)
+        return all_rides
