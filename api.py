@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from app_setup import db
 from models import UserModel
 from models import *
-from datetime import datetime
+from datetime import datetime, timedelta
 import enum
 
 class EnumField(fields.Raw):
@@ -49,7 +49,8 @@ rideFields = {
     'price_per_seat': fields.Float,
     'seats_available': fields.Integer,
     'status': EnumField,
-    'created_at': fields.DateTime(dt_format='iso8601')
+    'created_at': fields.DateTime(dt_format='iso8601'),
+    'rated': fields.Boolean(attribute='rated')
 }
 
 ride_args = reqparse.RequestParser()
@@ -170,7 +171,12 @@ class Login(Resource):
 class Rides(Resource):
     @marshal_with(rideFields)
     def get(self):
-        rides = RideModel.query.all()
+
+        cutoff_time = datetime.utcnow() - timedelta(hours=24)
+
+        rides = RideModel.query.filter(
+            RideModel.departure_time >= cutoff_time
+        ).all()
         for ride in rides:
             driver = UserModel.query.get(ride.driver_id)
             ride.driver_name = driver.username if driver else None
@@ -466,5 +472,13 @@ class UserRides(Resource):
         for ride in all_rides:
             driver = UserModel.query.get(ride.driver_id)
             ride.driver_name = driver.username if driver else None
+
+            user_rating_exists = RatingModel.query.filter_by(
+            ride_id=ride.id,
+            rater_id=id
+            ).first() is not None
+
+            ride.rated = user_rating_exists
+
 
         return all_rides
