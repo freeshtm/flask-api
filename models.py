@@ -31,6 +31,8 @@ class RideModel(db.Model):
     to_address = db.Column(db.Text, nullable=False)
     to_lat = db.Column(db.Float, nullable=False)
     to_lng = db.Column(db.Float, nullable=False)
+    start_city = db.Column(db.String(100), nullable=True)
+    end_city = db.Column(db.String(100), nullable=True)
     departure_time = db.Column(db.DateTime, nullable=False)
     price_per_seat = db.Column(db.Float, nullable=False)
     seats_available = db.Column(db.Integer, nullable=False)
