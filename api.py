@@ -45,6 +45,8 @@ rideFields = {
     'to_address': fields.String,
     'to_lat': fields.Float,
     'to_lng': fields.Float,
+    'start_city': fields.String,
+    'end_city': fields.String,
     'departure_time': fields.DateTime(dt_format='iso8601'),
     'price_per_seat': fields.Float,
     'seats_available': fields.Integer,
@@ -63,6 +65,8 @@ ride_args.add_argument('to_lng', type=float, required=True, help="To longitude c
 ride_args.add_argument('departure_time', type=str, required=True, help="Departure time cannot be blank (use ISO format)")
 ride_args.add_argument('price_per_seat', type=float, required=True, help="Price per seat cannot be blank")
 ride_args.add_argument('seats_available', type=int, required=True, help="Seats available cannot be blank")
+ride_args.add_argument('start_city', type=str, required=False)
+ride_args.add_argument('end_city', type=str, required=False)
 ride_args.add_argument('status', type=str, required=False, choices=('planned', 'in_progress', 'completed', 'cancelled'))
 #ride_args.add_argument('status', type=str, required=False, choices=('PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'))
 
@@ -170,7 +174,29 @@ class Login(Resource):
 class Rides(Resource):
     @marshal_with(rideFields)
     def get(self):
-        rides = RideModel.query.all()
+        from flask import request
+        from sqlalchemy import func
+        
+        origin = request.args.get('origin')
+        destination = request.args.get('destination')
+        date = request.args.get('date')  # YYYY-MM-DD
+        
+        query = RideModel.query
+        
+        if origin:
+            query = query.filter(func.lower(RideModel.start_city) == func.lower(origin))
+        
+        if destination:
+            query = query.filter(func.lower(RideModel.end_city) == func.lower(destination))
+        
+        if date:
+            try:
+                filter_date = datetime.strptime(date, '%Y-%m-%d').date()
+                query = query.filter(func.date(RideModel.departure_time) == filter_date)
+            except ValueError:
+                pass
+        
+        rides = query.all()
         for ride in rides:
             driver = UserModel.query.get(ride.driver_id)
             ride.driver_name = driver.username if driver else None
@@ -194,6 +220,8 @@ class Rides(Resource):
             to_address=args['to_address'],
             to_lat=args['to_lat'],
             to_lng=args['to_lng'],
+            start_city=args.get('start_city'),
+            end_city=args.get('end_city'),
             departure_time=departure_time,
             price_per_seat=args['price_per_seat'],
             seats_available=args['seats_available'],
